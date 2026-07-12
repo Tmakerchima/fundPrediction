@@ -1,0 +1,15 @@
+{
+  "name": "fund-lens-mvp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "场外基金趋势研究与风险提示 MVP",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

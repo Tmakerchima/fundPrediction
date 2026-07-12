@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#080b10" />
+    <meta name="description" content="场外基金趋势研究与风险提示工具" />
+    <title>FundLens — 场外基金趋势研究</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="/styles.css?v=0.2" />
+  </head>
+  <body>
+    <div class="ambient ambient-a"></div>
+    <div class="ambient ambient-b"></div>
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="FundLens 首页">
+        <span class="brand-mark"><i></i><i></i><i></i></span>
+        <span>FundLens</span>
+      </a>
+      <nav class="market-nav" aria-label="市场切换">
+        <a class="active" href="/">场外基金</a>
+        <a href="/a-shares.html">场内 A 股</a>
+        <a href="/us-stocks.html">美股</a>
+      </nav>
+      <div class="topbar-meta">
+        <span class="live-dot"></span>
+        <span>净值日频更新</span>
+        <button class="info-button" id="aboutButton" aria-label="查看模型说明">i</button>
+      </div>
+    </header>
+
+    <main>
+      <section class="hero" id="hero">
+        <div class="eyebrow"><span>RESEARCH TERMINAL</span><span>·</span><span>场外公募基金</span></div>
+        <h1>看见净值背后的<br /><em>趋势与风险。</em></h1>
+        <p>输入 6 位基金代码，用真实历史净值完成概率预测、滚动验证和风险解读。</p>
+        <div class="search-shell" id="searchShell">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"></circle><path d="m20 20-4-4"></path></svg>
+          <input id="fundSearch" inputmode="numeric" autocomplete="off" placeholder="搜索基金代码或名称，如 161725" aria-label="基金代码或名称" />
+          <button id="searchButton">开始分析 <span>↗</span></button>
+          <div class="suggestions hidden" id="suggestions"></div>
+        </div>
+        <div class="quick-picks">
+          <span>快速查看</span>
+          <button data-code="161725">招商中证白酒</button>
+          <button data-code="110022">易方达消费行业</button>
+          <button data-code="005827">易方达蓝筹精选</button>
+        </div>
+      </section>
+
+      <section class="recommendations" id="recommendationsSection">
+        <div class="recommendations-head">
+          <div>
+            <span class="section-kicker">TWO-WEEK WATCHLIST</span>
+            <h2>三套两周研究组合</h2>
+            <p>用安全边际、风险收益平衡和受限动量三种方法，把候选基金组合成不同风险档位。</p>
+          </div>
+          <div class="recommendation-badge"><span></span>每日净值更新后重算</div>
+        </div>
+        <div class="recommendation-grid" id="recommendationGrid">
+          <div class="recommendation-loading">正在计算候选基金的预测与样本外表现…</div>
+        </div>
+        <div class="recommendation-disclosure" id="recommendationDisclosure">
+          两周是预测窗口，不是建议持有期。高预测收益通常也伴随更高波动和追涨风险。
+        </div>
+      </section>
+
+      <section class="dashboard hidden" id="dashboard" aria-live="polite">
+        <div class="dashboard-head">
+          <div>
+            <button class="back-button" id="backButton">← 返回搜索</button>
+            <div class="fund-label"><span id="fundType">—</span><span id="fundCode">—</span></div>
+            <h2 id="fundName">—</h2>
+          </div>
+          <div class="nav-quote">
+            <span>最新单位净值</span>
+            <strong id="latestNav">—</strong>
+            <div id="latestChange" class="quote-change">—</div>
+            <small id="latestDate">—</small>
+          </div>
+        </div>
+
+        <div class="control-strip panel">
+          <div class="control-group">
+            <label>预测周期</label>
+            <div class="segmented" id="horizonControl">
+              <button data-horizon="5">5 日</button>
+              <button data-horizon="10">10 日</button>
+              <button class="active" data-horizon="20">20 日</button>
+              <button data-horizon="60">60 日</button>
+            </div>
+          </div>
+          <div class="divider"></div>
+          <div class="control-group">
+            <label>风险偏好</label>
+            <div class="segmented" id="riskControl">
+              <button data-risk="conservative">稳健</button>
+              <button class="active" data-risk="balanced">均衡</button>
+              <button data-risk="aggressive">进取</button>
+            </div>
+          </div>
+          <div class="freshness" id="freshness"><span></span> 数据已校验</div>
+        </div>
+
+        <div class="dashboard-grid">
+          <article class="chart-panel panel">
+            <div class="panel-head">
+              <div>
+                <span class="section-kicker">NAV TREND</span>
+                <h3>历史净值与概率路径</h3>
+              </div>
+              <div class="chart-legend">
+                <span><i class="history-key"></i>历史</span>
+                <span><i class="forecast-key"></i>预测中枢</span>
+                <span><i class="range-key"></i>80% 区间</span>
+              </div>
+            </div>
+            <div class="chart-wrap" id="chartWrap">
+              <svg id="mainChart" role="img" aria-label="基金历史净值与预测趋势图"></svg>
+              <div class="chart-tooltip hidden" id="chartTooltip"></div>
+            </div>
+            <div class="range-tabs" id="rangeTabs">
+              <button data-range="60">3M</button>
+              <button data-range="120">6M</button>
+              <button class="active" data-range="252">1Y</button>
+              <button data-range="756">3Y</button>
+              <button data-range="all">全部</button>
+            </div>
+          </article>
+
+          <aside class="signal-panel panel" id="signalPanel">
+            <div class="signal-top">
+              <div>
+                <span class="section-kicker">MODEL SIGNAL</span>
+                <h3>研究建议</h3>
+              </div>
+              <div class="score-ring" id="scoreRing"><strong id="score">—</strong><span>盈利概率</span></div>
+            </div>
+            <div class="action-pill" id="actionPill">等待分析</div>
+            <p class="signal-copy">综合趋势、波动、回撤和滚动验证形成；建议仅对应当前所选风险偏好。</p>
+            <ul class="reason-list" id="reasonList"></ul>
+            <div class="guardrail">
+              <svg viewBox="0 0 24 24"><path d="M12 3 4.5 6v5.3c0 4.6 3.2 8.3 7.5 9.7 4.3-1.4 7.5-5.1 7.5-9.7V6L12 3Z"></path><path d="m9 12 2 2 4-4"></path></svg>
+              <div><strong>资金纪律</strong><span>不追涨、不一次性重仓，预留至少 6 个月应急资金。</span></div>
+            </div>
+          </aside>
+
+          <article class="metrics-panel panel">
+            <div class="panel-head compact">
+              <div><span class="section-kicker">RISK SNAPSHOT</span><h3>风险快照</h3></div>
+            </div>
+            <div class="metrics-grid" id="metricsGrid"></div>
+          </article>
+
+          <article class="validation-panel panel">
+            <div class="panel-head compact">
+              <div><span class="section-kicker">WALK-FORWARD</span><h3>滚动样本外验证</h3></div>
+              <span class="model-tag">ENSEMBLE v0.1</span>
+            </div>
+            <div class="validation-body">
+              <div class="validation-stat"><span>方向命中率</span><strong id="directionAccuracy">—</strong><small id="directionInterval">95% 区间待计算</small></div>
+              <div class="validation-stat"><span>平均绝对百分比误差</span><strong id="mape">—</strong><small id="sampleCount">—</small></div>
+              <div class="validation-stat"><span>样本外 R²</span><strong id="oosR2">—</strong><small>相对随机游走基准</small></div>
+              <div class="validation-note">
+                <strong>模型如何工作</strong>
+                <p>局部趋势 45% · 指数动量 35% · 均值回归 20%。每个回测点只使用当时可见的数据，避免未来信息泄漏。</p>
+              </div>
+            </div>
+          </article>
+        </div>
+
+        <div class="disclaimer-bar">
+          <strong>重要提示</strong>
+          <p>本工具是研究型 MVP，仅基于历史净值推演，不包含实时持仓、基金经理变动、申赎费用与个人财务状况。预测存在显著误差，不构成任何收益承诺或个性化投资建议。</p>
+          <span id="dataSource">—</span>
+        </div>
+      </section>
+
+      <section class="feature-row" id="featureRow">
+        <article><span>01</span><h3>真实净值</h3><p>按基金代码连接公开日频净值，不用模拟行情冒充实时数据。</p></article>
+        <article><span>02</span><h3>概率而非断言</h3><p>同时展示预测中枢和 80% 区间，直观看见不确定性。</p></article>
+        <article><span>03</span><h3>先验证再解读</h3><p>走步式样本外回测，避免只展示一条看起来漂亮的曲线。</p></article>
+      </section>
+    </main>
+
+    <div class="loading-overlay hidden" id="loadingOverlay">
+      <div class="loader"><span></span><span></span><span></span></div>
+      <strong>正在读取净值并运行模型</strong>
+      <p>通常需要 2–5 秒</p>
+    </div>
+
+    <div class="toast hidden" id="toast"></div>
+
+    <dialog id="aboutDialog">
+      <button class="dialog-close" id="dialogClose">×</button>
+      <span class="section-kicker">ABOUT THE MODEL</span>
+      <h2>模型知道什么，也知道自己不知道什么。</h2>
+      <p>FundLens 使用历史单位净值计算局部趋势、指数加权动量与均值回归信号，再用近期波动估计概率区间。评分不是主观加分，而是“风险调整后的模型盈利概率”；它适合做研究筛选，不适合替你做确定性决策。</p>
+      <div class="dialog-grid"><div><strong>包含</strong><span>历史净值、趋势、波动、回撤、RSI、滚动验证</span></div><div><strong>不包含</strong><span>实时持仓、宏观事件、经理变更、费用税务、个人资产情况</span></div></div>
+    </dialog>
+
+    <script type="module" src="/app.js?v=0.2"></script>
+  </body>
+</html>

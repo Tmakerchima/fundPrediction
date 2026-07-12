@@ -1,0 +1,7 @@
+{
+  "version": 2,
+  "cleanUrls": true,
+  "rewrites": [
+    { "source": "/api/:path*", "destination": "https://REPLACE_WITH_RAILWAY_DOMAIN/api/:path*" }
+  ]
+}
