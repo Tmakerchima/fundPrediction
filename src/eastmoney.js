@@ -17,16 +17,25 @@ function cacheSet(key, value) {
 }
 
 async function eastmoneyFetch(url) {
-  const response = await fetch(url, {
-    headers: {
-      Accept: "application/json,text/plain,*/*",
-      Referer: "https://fund.eastmoney.com/",
-      "User-Agent": "FundLens-MVP/0.1 (+research-only)",
-    },
-    signal: AbortSignal.timeout(15_000),
-  });
-  if (!response.ok) throw new Error(`数据源返回 HTTP ${response.status}`);
-  return response.json();
+  let lastError;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const response = await fetch(url, {
+        headers: {
+          Accept: "application/json,text/plain,*/*",
+          Referer: "https://fund.eastmoney.com/",
+          "User-Agent": "Mozilla/5.0 FundLens-MVP/0.1",
+        },
+        signal: AbortSignal.timeout(12_000),
+      });
+      if (!response.ok) throw new Error(`数据源返回 HTTP ${response.status}`);
+      return response.json();
+    } catch (error) {
+      lastError = error;
+      if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 400 * (attempt + 1)));
+    }
+  }
+  throw new Error(`东方财富连接失败：${lastError?.message ?? "未知错误"}`);
 }
 
 async function eastmoneyText(url) {
@@ -154,7 +163,7 @@ export async function getRankCandidates(perType = 10) {
   const cached = cacheGet(key);
   if (cached) return cached;
   const fundTypes = ["gp", "hh", "zs", "zq", "qdii"];
-  const payloads = await Promise.all(
+  const payloads = await Promise.allSettled(
     fundTypes.map(async (fundType) => {
       const params = new URLSearchParams({
         ft: fundType,
@@ -177,7 +186,9 @@ export async function getRankCandidates(perType = 10) {
       return eastmoneyFetch(`${RANK_URL}?${params}`);
     }),
   );
-  const raw = payloads.flatMap((payload) => {
+  const raw = payloads.flatMap((result) => {
+    if (result.status !== "fulfilled") return [];
+    const payload = result.value;
     if (payload.ErrCode !== 0 || !payload.Data) return [];
     const data = typeof payload.Data === "string" ? JSON.parse(payload.Data) : payload.Data;
     return data.datas ?? [];
