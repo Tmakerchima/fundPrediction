@@ -110,6 +110,50 @@ export function classifyEvidenceTier(item) {
   return null;
 }
 
+function finalizeCandidate(item, fees = item.fees) {
+  const netProjectedReturn = netReturnAfterFees(
+    item.projectedTwoWeekReturn,
+    fees?.discountedPurchaseFee,
+    fees?.redemptionFee,
+  );
+  const next = {
+    ...item,
+    fees,
+    netProjectedReturn,
+    netProfitProbability: netProjectedReturn === null
+      ? null
+      : normalCdfApprox(Math.log(1 + netProjectedReturn) / item.forecastRisk),
+    rankingScore: netProjectedReturn === null ? Number.NEGATIVE_INFINITY : netProjectedReturn / item.forecastRisk,
+    errorCoverage: netProjectedReturn === null || !item.backtest.mape ? null : netProjectedReturn / item.backtest.mape,
+  };
+  next.ineligibilityReasons = eligibilityReasons(next);
+  next.eligible = next.ineligibilityReasons.length === 0;
+  next.evidenceTier = classifyEvidenceTier(next);
+  next.recommendable = next.evidenceTier !== null;
+  next.evidenceLabel = next.evidenceTier === "A"
+    ? "A级强证据"
+    : next.evidenceTier === "B"
+      ? "B级条件候选"
+      : next.evidenceTier === "C"
+        ? "C级高风险候选"
+        : "未达到候选门槛";
+  next.riskWarning = next.evidenceTier === "A"
+    ? "历史样本外证据相对较强，但仍可能亏损"
+    : next.evidenceTier === "B"
+      ? "获利期望尚可，但95%置信区间尚未排除随机性，仍可能亏损"
+      : next.evidenceTier === "C"
+        ? "仅达到宽松观察标准，误判和亏损风险较高"
+        : "当前证据不足，不作为主页候选";
+  next.holdingAction = next.netProjectedReturn !== null && next.netProjectedReturn <= 0
+    ? "复核退出条件"
+    : next.evidenceTier === "A"
+      ? "本周持有，不追涨加仓"
+      : next.recommendable
+        ? "条件持有，暂不加仓"
+        : "继续观察，暂不加仓";
+  return next;
+}
+
 async function analyzeCandidate(candidate) {
   const history = await getFastFundHistory(candidate.code);
   if (history.length < 252) return null;
@@ -140,19 +184,9 @@ async function analyzeCandidate(candidate) {
     && model.backtest.oosR2VsRandomWalk > -0.25
     && model.backtest.predictedUpSamples >= 15
     && model.backtest.directionAccuracy >= 0.5;
-  if (meritsFeeCheck) {
-    try {
-      fees = await getFundFeeProfile(candidate.code, holdingDays);
-    } catch {
-      // A fund with an unverifiable fee remains ineligible; no fallback fee is invented.
-    }
-  }
-
-  const netProjectedReturn = netReturnAfterFees(projectedReturn, fees.discountedPurchaseFee, fees.redemptionFee);
   const logSigma = Math.max((Math.log(lastForecast.upper80) - Math.log(lastForecast.lower80)) / (2 * 1.282), 0.0001);
   const tenDayRisk = Math.max(metrics.annualizedVolatility * Math.sqrt(HORIZON / 252), 0.005);
   const modelProfitProbability = normalCdfApprox(Math.log(lastForecast.nav / latest.nav) / logSigma);
-  const netProfitProbability = netProjectedReturn === null ? null : normalCdfApprox(Math.log(1 + netProjectedReturn) / tenDayRisk);
   const startTwoWeeks = history.at(-11) ?? history[0];
   const item = {
     code: candidate.code,
@@ -164,9 +198,11 @@ async function analyzeCandidate(candidate) {
     latestNav: latest.nav,
     recentTwoWeekReturn: latest.nav / startTwoWeeks.nav - 1,
     projectedTwoWeekReturn: projectedReturn,
-    netProjectedReturn,
+    netProjectedReturn: null,
     modelProfitProbability,
-    netProfitProbability,
+    netProfitProbability: null,
+    forecastRisk: tenDayRisk,
+    feeCheckEligible: meritsFeeCheck,
     plannedEntryDate,
     plannedExitDate,
     buyWindow: `${plannedEntryDate} 15:00 前提交；成交净值以基金确认规则为准`,
@@ -181,8 +217,8 @@ async function analyzeCandidate(candidate) {
     maxDrawdown: metrics.maxDrawdown,
     rsi14: metrics.rsi14,
     modelScore: model.assessment.score,
-    rankingScore: netProjectedReturn === null ? Number.NEGATIVE_INFINITY : netProjectedReturn / tenDayRisk,
-    errorCoverage: netProjectedReturn === null || !model.backtest.mape ? null : netProjectedReturn / model.backtest.mape,
+    rankingScore: Number.NEGATIVE_INFINITY,
+    errorCoverage: null,
     reliability: reliabilityOf(model.backtest),
     backtest: model.backtest,
     fees,
@@ -190,32 +226,7 @@ async function analyzeCandidate(candidate) {
       index === 0 ? null : Math.log(point.nav / series[index - 1].nav),
     ).filter((value) => value !== null),
   };
-  item.ineligibilityReasons = eligibilityReasons(item);
-  item.eligible = item.ineligibilityReasons.length === 0;
-  item.evidenceTier = classifyEvidenceTier(item);
-  item.recommendable = item.evidenceTier !== null;
-  item.evidenceLabel = item.evidenceTier === "A"
-    ? "A级强证据"
-    : item.evidenceTier === "B"
-      ? "B级条件候选"
-      : item.evidenceTier === "C"
-        ? "C级高风险候选"
-        : "未达到候选门槛";
-  item.riskWarning = item.evidenceTier === "A"
-    ? "历史样本外证据相对较强，但仍可能亏损"
-    : item.evidenceTier === "B"
-      ? "获利期望尚可，但95%置信区间尚未排除随机性，仍可能亏损"
-      : item.evidenceTier === "C"
-        ? "仅达到宽松观察标准，误判和亏损风险较高"
-        : "当前证据不足，不作为主页候选";
-  item.holdingAction = item.netProjectedReturn !== null && item.netProjectedReturn <= 0
-    ? "复核退出条件"
-    : item.evidenceTier === "A"
-      ? "本周持有，不追涨加仓"
-      : item.recommendable
-        ? "条件持有，暂不加仓"
-        : "继续观察，暂不加仓";
-  return item;
+  return finalizeCandidate(item, fees);
 }
 
 function mean(values) {
@@ -444,10 +455,23 @@ export async function collectSignals() {
       if (result.status === "fulfilled" && result.value) analyzed.push(result.value);
     }
   }
+  const feeCandidates = analyzed
+    .filter((item) => item.feeCheckEligible)
+    .sort((a, b) => (b.projectedTwoWeekReturn / b.forecastRisk) - (a.projectedTwoWeekReturn / a.forecastRisk))
+    .slice(0, 18);
+  const feeResults = await Promise.allSettled(feeCandidates.map((item) =>
+    getFundFeeProfile(item.code, item.fees.holdingDays)));
+  const verifiedByCode = new Map();
+  for (let index = 0; index < feeResults.length; index += 1) {
+    const result = feeResults[index];
+    if (result.status === "fulfilled") verifiedByCode.set(feeCandidates[index].code, result.value);
+  }
+  const finalized = analyzed.map((item) =>
+    verifiedByCode.has(item.code) ? finalizeCandidate(item, verifiedByCode.get(item.code)) : item);
   return {
     ...candidateSnapshot,
-    analyzed,
-    analysisCompleteness: candidateSnapshot.candidates.length ? analyzed.length / candidateSnapshot.candidates.length : 0,
+    analyzed: finalized,
+    analysisCompleteness: candidateSnapshot.candidates.length ? finalized.length / candidateSnapshot.candidates.length : 0,
   };
 }
 
@@ -568,8 +592,13 @@ export async function getTwoWeekRecommendations() {
 export async function getHoldingReview(code, options = {}) {
   const cleanCode = validateFundCode(code);
   const fund = await getFundMeta(cleanCode);
-  const signal = await analyzeCandidate({ code: cleanCode, name: fund.name, type: fund.type });
+  let signal = await analyzeCandidate({ code: cleanCode, name: fund.name, type: fund.type });
   if (!signal) throw new Error("该基金历史数据不足或净值过期，暂时无法评估持仓");
+  try {
+    signal = finalizeCandidate(signal, await getFundFeeProfile(cleanCode, signal.fees.holdingDays));
+  } catch {
+    // The holding review will disclose that the current fee could not be verified.
+  }
   const purchaseDate = /^\d{4}-\d{2}-\d{2}$/.test(options.purchaseDate || "") ? options.purchaseDate : null;
   const purchaseNav = Number(options.purchaseNav);
   const amount = Number(options.amount);
