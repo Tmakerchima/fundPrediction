@@ -247,16 +247,80 @@ async function loadRecommendations() {
     grid.innerHTML = result.portfolios.map((portfolio) => `<article class="portfolio-card">
       <div class="portfolio-card-top"><span class="recommendation-rank">${escapeHtml(portfolio.name)}</span><span>${escapeHtml(portfolio.philosophy)}</span></div>
       <h3>${escapeHtml(portfolio.rationale)}</h3>
-      <div class="portfolio-stats"><span>组合预测中枢 <strong>${fmtPercent(portfolio.expectedReturn)}</strong></span><span>模型盈利概率 <strong>${(portfolio.modelProfitProbability * 100).toFixed(0)}%</strong></span><span>现金仓位 <strong>${(portfolio.cashWeight * 100).toFixed(0)}%</strong></span></div>
-      <div class="recommendation-schedule"><span>计划买入</span><strong>${portfolio.buyWindow}</strong><span>计划退出复核</span><strong>${portfolio.sellWindow}</strong><span>加仓规则</span><strong>回撤≥5%、组合预测仍为正时，仅加单个持仓25%一次</strong></div>
-      <div class="portfolio-positions"><span>组合持仓</span>${portfolio.positions.map((position) => `<button class="portfolio-fund" data-recommendation-code="${position.code}"><b>${escapeHtml(position.code)}</b><span>${escapeHtml(position.name)}</span><em>${(position.weight * 100).toFixed(0)}%</em></button>`).join("")}</div>
+      <div class="portfolio-stats"><span>费用前中枢 <strong>${portfolio.positions.length ? fmtPercent(portfolio.grossExpectedReturn) : "—"}</strong></span><span>费用后中枢 <strong>${portfolio.positions.length ? fmtPercent(portfolio.expectedReturn) : "—"}</strong></span><span>现金仓位 <strong>${(portfolio.cashWeight * 100).toFixed(0)}%</strong></span></div>
+      <div class="recommendation-schedule"><span>决策周期</span><strong>${escapeHtml(result.decisionWeek)} 当周锁定</strong><span>计划窗口</span><strong>${escapeHtml(portfolio.buyWindow)}</strong><span>调仓纪律</span><strong>${escapeHtml(portfolio.rebalancePolicy)}</strong></div>
+      <div class="portfolio-positions"><span>通过严格门槛的组合持仓</span>${portfolio.positions.length ? portfolio.positions.map((position) => `<button class="portfolio-fund" data-recommendation-code="${position.code}" title="${escapeHtml(position.positionStatus)}"><b>${escapeHtml(position.code)}</b><span>${escapeHtml(position.name)}</span><em>${(position.weight * 100).toFixed(0)}%</em></button>`).join("") : `<div class="portfolio-empty">没有基金通过本周全部门槛<br>系统保留现金，不强行补满三只</div>`}</div>
+      ${portfolio.positions.length ? `<div class="portfolio-status">${portfolio.positions.map((position) => `${escapeHtml(position.code)}：费用后 ${fmtPercent(position.netProjectedReturn)} · ${escapeHtml(position.positionStatus)}`).join("<br>")}</div>` : ""}
       <small class="portfolio-note">${escapeHtml(portfolio.exitRule)}</small>
     </article>`).join("");
-    $("#recommendationDisclosure").textContent = `${result.concentrationWarning} ${result.caveat} 候选池 ${result.universeSize} 只，成功分析 ${result.analyzedCount} 只。`;
+    $("#recommendationDisclosure").textContent = `${result.decisionStatus} ${result.concentrationWarning} 候选池 ${result.universeSize} 只，成功分析 ${result.analyzedCount} 只，通过严格门槛 ${result.eligibleCount} 只。数据源完整度 ${(result.sourceCompleteness * 100).toFixed(0)}%，分析完整度 ${(result.analysisCompleteness * 100).toFixed(0)}%。${result.caveat}`;
     grid.querySelectorAll("[data-recommendation-code]").forEach((button) => button.addEventListener("click", () => loadFund(button.dataset.recommendationCode)));
   } catch (error) {
     grid.innerHTML = `<div class="recommendation-loading">关注榜暂时无法计算：${escapeHtml(error.message)}</div>`;
   }
 }
 
+const HOLDINGS_KEY = "fundlens-holdings-v1";
+
+function storedHoldings() {
+  try { return JSON.parse(localStorage.getItem(HOLDINGS_KEY) || "[]"); }
+  catch { return []; }
+}
+
+function saveHoldings(holdings) {
+  localStorage.setItem(HOLDINGS_KEY, JSON.stringify(holdings));
+}
+
+async function renderHoldings() {
+  const container = $("#holdingList");
+  const holdings = storedHoldings();
+  if (!holdings.length) {
+    container.innerHTML = `<div class="holding-empty">尚未记录持仓</div>`;
+    return;
+  }
+  container.innerHTML = `<div class="holding-empty">正在按最新净值复核 ${holdings.length} 个持仓…</div>`;
+  const reviews = await Promise.allSettled(holdings.map(async (holding) => {
+    const params = new URLSearchParams();
+    if (holding.purchaseDate) params.set("purchaseDate", holding.purchaseDate);
+    if (holding.purchaseNav) params.set("purchaseNav", holding.purchaseNav);
+    if (holding.amount) params.set("amount", holding.amount);
+    return api(`/api/funds/${holding.code}/holding-review?${params}`);
+  }));
+  container.innerHTML = reviews.map((result, index) => {
+    const saved = holdings[index];
+    if (result.status === "rejected") return `<article class="holding-card"><div><span>${escapeHtml(saved.code)}</span><strong>暂时无法复核</strong></div><div class="holding-action"><span>原因</span><strong>${escapeHtml(result.reason.message)}</strong></div><button class="holding-remove" data-remove-holding="${escapeHtml(saved.code)}">删除</button></article>`;
+    const review = result.value;
+    const holding = review.holding;
+    return `<article class="holding-card">
+      <div><span>${escapeHtml(review.fund.code)} · ${escapeHtml(review.fund.type)}</span><strong>${escapeHtml(review.fund.name)}</strong></div>
+      <div><span>最新净值</span><strong>${fmtNumber(review.signal.latestNav)}</strong></div>
+      <div><span>持仓收益</span><strong>${holding.unrealizedReturn === null ? "待填写确认净值" : fmtPercent(holding.unrealizedReturn)}</strong></div>
+      <div class="holding-action"><span>独立持仓结论</span><strong>${escapeHtml(review.action)}</strong><span>${escapeHtml(review.rationale.join("；"))}</span></div>
+      <button class="holding-remove" data-remove-holding="${escapeHtml(saved.code)}">删除</button>
+    </article>`;
+  }).join("");
+  container.querySelectorAll("[data-remove-holding]").forEach((button) => button.addEventListener("click", () => {
+    saveHoldings(storedHoldings().filter((holding) => holding.code !== button.dataset.removeHolding));
+    renderHoldings();
+  }));
+}
+
+$("#holdingForm").addEventListener("submit", (event) => {
+  event.preventDefault();
+  const code = $("#holdingCode").value.trim();
+  if (!/^\d{6}$/.test(code)) return showToast("请输入正确的6位基金代码");
+  const record = {
+    code,
+    purchaseDate: $("#holdingDate").value || null,
+    purchaseNav: Number($("#holdingNav").value) || null,
+    amount: Number($("#holdingAmount").value) || null,
+  };
+  const holdings = storedHoldings().filter((holding) => holding.code !== code);
+  holdings.push(record);
+  saveHoldings(holdings);
+  renderHoldings();
+  showToast("持仓已保存在当前浏览器");
+});
+
 loadRecommendations();
+renderHoldings();

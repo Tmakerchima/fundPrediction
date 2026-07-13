@@ -2,6 +2,7 @@ const HISTORY_URL = "https://api.fund.eastmoney.com/f10/lsjz";
 const SEARCH_URL = "https://fundsuggest.eastmoney.com/FundSearch/api/FundSearchAPI.ashx";
 const RANK_URL = "https://api.fund.eastmoney.com/FundTradeRank/GetRankList";
 const FAST_HISTORY_URL = "https://fund.eastmoney.com/pingzhongdata";
+const FEE_URL = "https://fundf10.eastmoney.com/jjfl";
 const CACHE_TTL = 10 * 60 * 1000;
 const cache = new Map();
 
@@ -159,6 +160,11 @@ function productKey(name) {
 }
 
 export async function getRankCandidates(perType = 10) {
+  const snapshot = await getRankCandidateSnapshot(perType);
+  return snapshot.candidates;
+}
+
+export async function getRankCandidateSnapshot(perType = 10) {
   const key = `rank-candidates:${perType}`;
   const cached = cacheGet(key);
   if (cached) return cached;
@@ -167,7 +173,7 @@ export async function getRankCandidates(perType = 10) {
     fundTypes.map(async (fundType) => {
       const params = new URLSearchParams({
         ft: fundType,
-        sc: "1y",
+        sc: "1m",
         st: "desc",
         pi: "1",
         pn: String(perType),
@@ -186,11 +192,13 @@ export async function getRankCandidates(perType = 10) {
       return eastmoneyFetch(`${RANK_URL}?${params}`);
     }),
   );
-  const raw = payloads.flatMap((result) => {
+  const successfulTypes = [];
+  const raw = payloads.flatMap((result, index) => {
     if (result.status !== "fulfilled") return [];
     const payload = result.value;
     if (payload.ErrCode !== 0 || !payload.Data) return [];
     const data = typeof payload.Data === "string" ? JSON.parse(payload.Data) : payload.Data;
+    successfulTypes.push(fundTypes[index]);
     return data.datas ?? [];
   });
   const candidates = raw
@@ -218,5 +226,83 @@ export async function getRankCandidates(perType = 10) {
     const existingIsA = existing && /A(?:类)?(?:人民币)?$/i.test(existing.name);
     if (!existing || (candidateIsA && !existingIsA)) deduplicated.set(candidate.productKey, candidate);
   }
-  return cacheSet(key, [...deduplicated.values()]);
+  return cacheSet(key, {
+    candidates: [...deduplicated.values()],
+    requestedTypes: fundTypes,
+    successfulTypes,
+    sourceCompleteness: successfulTypes.length / fundTypes.length,
+    fetchedAt: new Date().toISOString(),
+  });
+}
+
+function textOnly(html) {
+  return String(html)
+    .replace(/<br\s*\/?>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function tableAfter(html, label) {
+  const start = html.indexOf(label);
+  if (start < 0) return "";
+  const tableStart = html.indexOf("<table", start);
+  const tableEnd = html.indexOf("</table>", tableStart);
+  return tableStart >= 0 && tableEnd >= 0 ? html.slice(tableStart, tableEnd + 8) : "";
+}
+
+function tableRows(table) {
+  return [...table.matchAll(/<tr[^>]*>([\s\S]*?)<\/tr>/gi)].map((row) =>
+    [...row[1].matchAll(/<t[dh][^>]*>([\s\S]*?)<\/t[dh]>/gi)].map((cell) => textOnly(cell[1])),
+  );
+}
+
+function percentages(text) {
+  return [...String(text).matchAll(/(\d+(?:\.\d+)?)%/g)].map((match) => Number(match[1]) / 100);
+}
+
+function durationMatches(label, days) {
+  const values = [...label.matchAll(/(\d+)\s*天/g)].map((match) => Number(match[1]));
+  if (!values.length) return false;
+  if (/大于等于/.test(label) && /小于等于/.test(label) && values.length >= 2) return days >= values[0] && days <= values[1];
+  if (/大于等于/.test(label)) return days >= values[0];
+  if (/大于/.test(label) && /小于/.test(label) && values.length >= 2) return days > values[0] && days < values[1];
+  if (/小于等于/.test(label)) return days <= values[0];
+  if (/小于/.test(label)) return days < values[0];
+  return false;
+}
+
+export function parseFundFeeHtml(html, holdingDays = 14) {
+  const purchaseRows = tableRows(tableAfter(html, "申购费率")).filter((row) => row.length >= 2);
+  const purchaseRates = purchaseRows
+    .filter((row) => /小于\s*100\s*万元/.test(row[0]) || /M\s*<\s*100/.test(row[0]))
+    .flatMap((row) => percentages(row[1]));
+  const fallbackPurchaseRates = purchaseRows.flatMap((row) => percentages(row[1]));
+  const applicablePurchaseRates = purchaseRates.length ? purchaseRates : fallbackPurchaseRates;
+  const standardPurchaseFee = applicablePurchaseRates[0] ?? null;
+  const discountedPurchaseFee = applicablePurchaseRates.at(-1) ?? null;
+
+  const redemptionRows = tableRows(tableAfter(html, "赎回费率")).filter((row) => row.length >= 2);
+  const redemptionRow = redemptionRows.find((row) => durationMatches(row[0], holdingDays));
+  const redemptionFee = redemptionRow ? percentages(redemptionRow[1])[0] ?? null : null;
+
+  return {
+    standardPurchaseFee,
+    discountedPurchaseFee,
+    redemptionFee,
+    holdingDays,
+    verified: discountedPurchaseFee !== null && redemptionFee !== null,
+  };
+}
+
+export async function getFundFeeProfile(code, holdingDays = 14) {
+  validateFundCode(code);
+  const key = `fees:${code}:${holdingDays}`;
+  const cached = cacheGet(key);
+  if (cached) return cached;
+  const sourceUrl = `${FEE_URL}_${code}.html`;
+  const html = await eastmoneyText(sourceUrl);
+  return cacheSet(key, { ...parseFundFeeHtml(html, holdingDays), sourceUrl });
 }

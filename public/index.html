@@ -9,7 +9,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <link rel="stylesheet" href="/styles.css?v=0.2" />
+    <link rel="stylesheet" href="/styles.css?v=0.3" />
   </head>
   <body>
     <div class="ambient ambient-a"></div>
@@ -54,10 +54,10 @@
         <div class="recommendations-head">
           <div>
             <span class="section-kicker">TWO-WEEK WATCHLIST</span>
-            <h2>三套两周研究组合</h2>
-            <p>用安全边际、风险收益平衡和受限动量三种方法，把候选基金组合成不同风险档位。</p>
+            <h2>本周三套研究组合</h2>
+            <p>每日更新预测信号，每周最多调整一次组合；先扣申赎费，再做样本外门槛和风险排序。</p>
           </div>
-          <div class="recommendation-badge"><span></span>每日净值更新后重算</div>
+          <div class="recommendation-badge"><span></span>每日信号 · 每周决策</div>
         </div>
         <div class="recommendation-grid" id="recommendationGrid">
           <div class="recommendation-loading">正在计算候选基金的预测与样本外表现…</div>
@@ -65,6 +65,20 @@
         <div class="recommendation-disclosure" id="recommendationDisclosure">
           两周是预测窗口，不是建议持有期。高预测收益通常也伴随更高波动和追涨风险。
         </div>
+        <section class="holding-tracker" aria-labelledby="holdingTrackerTitle">
+          <div class="holding-tracker-head">
+            <div><span class="section-kicker">MY HOLDINGS</span><h3 id="holdingTrackerTitle">已有持仓单独复核</h3></div>
+            <p>基金掉出前三不自动等于卖出。数据只保存在当前浏览器。</p>
+          </div>
+          <form class="holding-form" id="holdingForm">
+            <label>基金代码<input id="holdingCode" inputmode="numeric" maxlength="6" placeholder="如 161133" required /></label>
+            <label>买入日期<input id="holdingDate" type="date" /></label>
+            <label>确认净值<input id="holdingNav" type="number" min="0" step="0.0001" placeholder="可选" /></label>
+            <label>投入金额<input id="holdingAmount" type="number" min="0" step="0.01" placeholder="如 500" /></label>
+            <button type="submit">保存并复核</button>
+          </form>
+          <div class="holding-list" id="holdingList"><div class="holding-empty">尚未记录持仓</div></div>
+        </section>
       </section>
 
       <section class="dashboard hidden" id="dashboard" aria-live="polite">
@@ -173,7 +187,7 @@
 
         <div class="disclaimer-bar">
           <strong>重要提示</strong>
-          <p>本工具是研究型 MVP，仅基于历史净值推演，不包含实时持仓、基金经理变动、申赎费用与个人财务状况。预测存在显著误差，不构成任何收益承诺或个性化投资建议。</p>
+          <p>本工具是研究型 MVP。关注榜会读取公开申购优惠费率和对应持有期赎回费，但实际销售平台费率与确认净值仍需下单前核对；模型不包含个人完整财务状况，不构成收益承诺或个性化投资建议。</p>
           <span id="dataSource">—</span>
         </div>
       </section>
@@ -197,10 +211,10 @@
       <button class="dialog-close" id="dialogClose">×</button>
       <span class="section-kicker">ABOUT THE MODEL</span>
       <h2>模型知道什么，也知道自己不知道什么。</h2>
-      <p>FundLens 使用历史单位净值计算局部趋势、指数加权动量与均值回归信号，再用近期波动估计概率区间。评分不是主观加分，而是“风险调整后的模型盈利概率”；它适合做研究筛选，不适合替你做确定性决策。</p>
-      <div class="dialog-grid"><div><strong>包含</strong><span>历史净值、趋势、波动、回撤、RSI、滚动验证</span></div><div><strong>不包含</strong><span>实时持仓、宏观事件、经理变更、费用税务、个人资产情况</span></div></div>
+      <p>FundLens 使用历史单位净值计算局部趋势、指数加权动量与均值回归信号，再用近期波动估计概率区间。主页先扣公开费率页显示的短持有期成本，再以样本外证据做硬门槛；组合按周锁定，不追逐每日名次。</p>
+      <div class="dialog-grid"><div><strong>包含</strong><span>历史净值、趋势、波动、回撤、公开申赎费率、滚动验证</span></div><div><strong>不包含</strong><span>当天未知确认净值、宏观事件、完整经理变更、个人资产情况</span></div></div>
     </dialog>
 
-    <script type="module" src="/app.js?v=0.2"></script>
+    <script type="module" src="/app.js?v=0.3"></script>
   </body>
 </html>

@@ -4,7 +4,7 @@ import { extname, join, normalize } from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildAnalysis } from "./model.js";
 import { getFundHistory, getFundMeta, searchFunds, validateFundCode } from "./eastmoney.js";
-import { getTwoWeekRecommendations } from "./recommendations.js";
+import { getHoldingReview, getTwoWeekRecommendations } from "./recommendations.js";
 import { getStockData, searchStocks } from "./stock-data.js";
 import { analyzeStock, getStockRecommendations } from "./stock-analysis.js";
 import { llmStatus, reviewEvidence } from "./llm-review.js";
@@ -52,6 +52,15 @@ async function handleApi(request, response, url) {
   if (url.pathname === "/api/recommendations") {
     const recommendations = await getTwoWeekRecommendations();
     return json(response, 200, recommendations);
+  }
+  const holdingReview = url.pathname.match(/^\/api\/funds\/(\d{6})\/holding-review$/);
+  if (holdingReview) {
+    const review = await getHoldingReview(holdingReview[1], {
+      purchaseDate: url.searchParams.get("purchaseDate"),
+      purchaseNav: url.searchParams.get("purchaseNav"),
+      amount: url.searchParams.get("amount"),
+    });
+    return json(response, 200, review);
   }
   const stockSearch = url.pathname.match(/^\/api\/stocks\/(a|us)\/search$/);
   if (stockSearch) {
