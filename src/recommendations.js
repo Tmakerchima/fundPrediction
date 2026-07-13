@@ -99,18 +99,25 @@ async function analyzeCandidate(candidate) {
   const plannedEntryDate = [addWeekdays(latest.date, 1), addWeekdays(currentShanghaiDate(), 1)].sort().at(-1);
   const plannedExitDate = addWeekdays(plannedEntryDate, HORIZON);
   const holdingDays = calendarDaysBetween(plannedEntryDate, plannedExitDate);
-  let fees;
-  try {
-    fees = await getFundFeeProfile(candidate.code, holdingDays);
-  } catch {
-    fees = {
-      standardPurchaseFee: null,
-      discountedPurchaseFee: null,
-      redemptionFee: null,
-      holdingDays,
-      verified: false,
-      sourceUrl: `https://fundf10.eastmoney.com/jjfl_${candidate.code}.html`,
-    };
+  let fees = {
+    standardPurchaseFee: null,
+    discountedPurchaseFee: null,
+    redemptionFee: null,
+    holdingDays,
+    verified: false,
+    sourceUrl: `https://fundf10.eastmoney.com/jjfl_${candidate.code}.html`,
+  };
+  const passesStatisticalGate = projectedReturn > 0
+    && metrics.rsi14 < 84
+    && model.backtest.oosR2VsRandomWalk > 0
+    && model.backtest.predictedUpSamples >= 20
+    && model.backtest.directionInterval95.lower >= 0.5;
+  if (passesStatisticalGate) {
+    try {
+      fees = await getFundFeeProfile(candidate.code, holdingDays);
+    } catch {
+      // A fund with an unverifiable fee remains ineligible; no fallback fee is invented.
+    }
   }
 
   const netProjectedReturn = netReturnAfterFees(projectedReturn, fees.discountedPurchaseFee, fees.redemptionFee);
