@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { parseFundFeeHtml } from "../src/eastmoney.js";
-import { applyHoldingBuffer, chooseDistinct, eligibilityReasons } from "../src/recommendations.js";
+import { applyHoldingBuffer, chooseDistinct, classifyEvidenceTier, eligibilityReasons, isTwoWeekCompatible } from "../src/recommendations.js";
 
 const feeHtml = `
   <label>申购费率</label><table><tr><th>适用金额</th><th>费率</th></tr>
@@ -22,6 +22,7 @@ test("fee parser selects the displayed discount and applicable redemption band",
 
 test("strict eligibility requires fees and sample-out evidence", () => {
   const item = {
+    twoWeekCompatible: true,
     fees: { verified: true },
     projectedTwoWeekReturn: 0.02,
     netProjectedReturn: 0.01,
@@ -34,6 +35,30 @@ test("strict eligibility requires fees and sample-out evidence", () => {
   };
   assert.deepEqual(eligibilityReasons(item), []);
   assert.ok(eligibilityReasons({ ...item, netProjectedReturn: -0.01 }).includes("费用后预测不为正"));
+});
+
+test("evidence tiers relax confidence without hiding the risk distinction", () => {
+  const base = {
+    twoWeekCompatible: true,
+    fees: { verified: true },
+    netProjectedReturn: 0.01,
+    rsi14: 50,
+    backtest: {
+      oosR2VsRandomWalk: 0.1,
+      predictedUpSamples: 24,
+      directionAccuracy: 0.6,
+      directionInterval95: { lower: 0.47 },
+    },
+  };
+  assert.equal(classifyEvidenceTier(base), "B");
+  assert.equal(classifyEvidenceTier({ ...base, backtest: { ...base.backtest, directionInterval95: { lower: 0.51 } } }), "A");
+  assert.equal(classifyEvidenceTier({ ...base, backtest: { ...base.backtest, oosR2VsRandomWalk: -0.1, directionAccuracy: 0.52 } }), "C");
+});
+
+test("long holding and retirement products are excluded from a two-week strategy", () => {
+  assert.equal(isTwoWeekCompatible("易方达养老2055五年持有混合FOF"), false);
+  assert.equal(isTwoWeekCompatible("某某六个月持有混合"), false);
+  assert.equal(isTwoWeekCompatible("普通开放式混合A"), true);
 });
 
 test("distinct selector preserves the supplied low-risk ordering", () => {

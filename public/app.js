@@ -245,15 +245,15 @@ async function loadRecommendations() {
   try {
     const result = await api("/api/recommendations");
     grid.innerHTML = result.portfolios.map((portfolio) => `<article class="portfolio-card">
-      <div class="portfolio-card-top"><span class="recommendation-rank">${escapeHtml(portfolio.name)}</span><span>${escapeHtml(portfolio.philosophy)}</span></div>
+      <div class="portfolio-card-top"><span class="recommendation-rank">${escapeHtml(portfolio.name)}</span><span>${escapeHtml(portfolio.selectionLabel || portfolio.philosophy)}</span></div>
       <h3>${escapeHtml(portfolio.rationale)}</h3>
       <div class="portfolio-stats"><span>费用前中枢 <strong>${portfolio.positions.length ? fmtPercent(portfolio.grossExpectedReturn) : "—"}</strong></span><span>费用后中枢 <strong>${portfolio.positions.length ? fmtPercent(portfolio.expectedReturn) : "—"}</strong></span><span>现金仓位 <strong>${(portfolio.cashWeight * 100).toFixed(0)}%</strong></span></div>
       <div class="recommendation-schedule"><span>决策周期</span><strong>${escapeHtml(result.decisionWeek)} 当周锁定</strong><span>计划窗口</span><strong>${escapeHtml(portfolio.buyWindow)}</strong><span>调仓纪律</span><strong>${escapeHtml(portfolio.rebalancePolicy)}</strong></div>
-      <div class="portfolio-positions"><span>通过严格门槛的组合持仓</span>${portfolio.positions.length ? portfolio.positions.map((position) => `<button class="portfolio-fund" data-recommendation-code="${position.code}" title="${escapeHtml(position.positionStatus)}"><b>${escapeHtml(position.code)}</b><span>${escapeHtml(position.name)}</span><em>${(position.weight * 100).toFixed(0)}%</em></button>`).join("") : `<div class="portfolio-empty">没有基金通过本周全部门槛<br>系统保留现金，不强行补满三只</div>`}</div>
-      ${portfolio.positions.length ? `<div class="portfolio-status">${portfolio.positions.map((position) => `${escapeHtml(position.code)}：费用后 ${fmtPercent(position.netProjectedReturn)} · ${escapeHtml(position.positionStatus)}`).join("<br>")}</div>` : ""}
+      <div class="portfolio-positions"><span>${escapeHtml(portfolio.selectionLabel || "研究候选")}持仓</span>${portfolio.positions.length ? portfolio.positions.map((position) => `<button class="portfolio-fund" data-recommendation-code="${position.code}" title="${escapeHtml(position.positionStatus)}"><b>${escapeHtml(position.code)}</b><span>${escapeHtml(position.name)}</span><em>${(position.weight * 100).toFixed(0)}%</em></button>`).join("") : `<div class="portfolio-empty">没有基金达到当前候选门槛<br>系统保留现金</div>`}</div>
+      ${portfolio.positions.length ? `<div class="portfolio-status"><strong>${escapeHtml(portfolio.riskWarning)}</strong><br>${portfolio.positions.map((position) => `${escapeHtml(position.code)} · ${escapeHtml(position.evidenceLabel)} · 费用后 ${fmtPercent(position.netProjectedReturn)}<br>${escapeHtml(position.riskWarning)}`).join("<br>")}</div>` : ""}
       <small class="portfolio-note">${escapeHtml(portfolio.exitRule)}</small>
     </article>`).join("");
-    $("#recommendationDisclosure").textContent = `${result.decisionStatus} ${result.concentrationWarning} 候选池 ${result.universeSize} 只，成功分析 ${result.analyzedCount} 只，通过严格门槛 ${result.eligibleCount} 只。数据源完整度 ${(result.sourceCompleteness * 100).toFixed(0)}%，分析完整度 ${(result.analysisCompleteness * 100).toFixed(0)}%。${result.caveat}`;
+    $("#recommendationDisclosure").textContent = `${result.decisionStatus} ${result.concentrationWarning} 候选池 ${result.universeSize} 只，成功分析 ${result.analyzedCount} 只；A级 ${result.tierCounts.A} 只、B级 ${result.tierCounts.B} 只、C级 ${result.tierCounts.C} 只。数据源完整度 ${(result.sourceCompleteness * 100).toFixed(0)}%，分析完整度 ${(result.analysisCompleteness * 100).toFixed(0)}%。${result.caveat}`;
     grid.querySelectorAll("[data-recommendation-code]").forEach((button) => button.addEventListener("click", () => loadFund(button.dataset.recommendationCode)));
   } catch (error) {
     grid.innerHTML = `<div class="recommendation-loading">关注榜暂时无法计算：${escapeHtml(error.message)}</div>`;

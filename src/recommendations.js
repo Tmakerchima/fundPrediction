@@ -16,6 +16,7 @@ const MIN_SOURCE_COMPLETENESS = Number(process.env.MIN_SOURCE_COMPLETENESS || 0.
 const MIN_ANALYSIS_COMPLETENESS = Number(process.env.MIN_ANALYSIS_COMPLETENESS || 0.7);
 const CANDIDATES_PER_TYPE = Number(process.env.CANDIDATES_PER_TYPE || 40);
 const HALF_TURNOVER = 0.5;
+const STATE_VERSION = 3;
 let resultCache = null;
 
 function themeOf(name) {
@@ -72,6 +73,10 @@ function netReturnAfterFees(grossReturn, entryFee, exitFee) {
   return (1 + grossReturn) * (1 - entryFee) * (1 - exitFee) - 1;
 }
 
+export function isTwoWeekCompatible(name) {
+  return !/(养老|封闭|定期开放|定开|持有期|(?:三|六|九|十|\d+)个?月持有|(?:一|二|两|三|四|五|\d+)年持有)/.test(String(name));
+}
+
 export function eligibilityReasons(item) {
   const reasons = [];
   if (!item.fees?.verified) reasons.push("申赎费率未验证");
@@ -81,7 +86,28 @@ export function eligibilityReasons(item) {
   if (!(item.backtest.oosR2VsRandomWalk > 0)) reasons.push("样本外R²未战胜随机游走");
   if (!(item.backtest.predictedUpSamples >= 20)) reasons.push("看涨样本少于20个");
   if (!(item.backtest.directionInterval95.lower >= 0.5)) reasons.push("方向命中率置信下限未超过50%");
+  if (!item.twoWeekCompatible) reasons.push("产品持有安排不适合两周操作");
   return reasons;
+}
+
+export function classifyEvidenceTier(item) {
+  const base = item.twoWeekCompatible
+    && item.fees?.verified
+    && item.netProjectedReturn > 0
+    && item.rsi14 < 84;
+  if (base
+    && item.backtest.oosR2VsRandomWalk > 0
+    && item.backtest.predictedUpSamples >= 20
+    && item.backtest.directionInterval95.lower >= 0.5) return "A";
+  if (base
+    && item.backtest.oosR2VsRandomWalk > 0
+    && item.backtest.predictedUpSamples >= 20
+    && item.backtest.directionAccuracy >= 0.55) return "B";
+  if (base
+    && item.backtest.oosR2VsRandomWalk > -0.25
+    && item.backtest.predictedUpSamples >= 15
+    && item.backtest.directionAccuracy >= 0.5) return "C";
+  return null;
 }
 
 async function analyzeCandidate(candidate) {
@@ -107,12 +133,14 @@ async function analyzeCandidate(candidate) {
     verified: false,
     sourceUrl: `https://fundf10.eastmoney.com/jjfl_${candidate.code}.html`,
   };
-  const passesStatisticalGate = projectedReturn > 0
+  const twoWeekCompatible = isTwoWeekCompatible(candidate.name);
+  const meritsFeeCheck = twoWeekCompatible
+    && projectedReturn > 0
     && metrics.rsi14 < 84
-    && model.backtest.oosR2VsRandomWalk > 0
-    && model.backtest.predictedUpSamples >= 20
-    && model.backtest.directionInterval95.lower >= 0.5;
-  if (passesStatisticalGate) {
+    && model.backtest.oosR2VsRandomWalk > -0.25
+    && model.backtest.predictedUpSamples >= 15
+    && model.backtest.directionAccuracy >= 0.5;
+  if (meritsFeeCheck) {
     try {
       fees = await getFundFeeProfile(candidate.code, holdingDays);
     } catch {
@@ -130,6 +158,7 @@ async function analyzeCandidate(candidate) {
     code: candidate.code,
     name: candidate.name,
     type: candidate.type,
+    twoWeekCompatible,
     theme: themeOf(candidate.name),
     latestDate: latest.date,
     latestNav: latest.nav,
@@ -163,11 +192,29 @@ async function analyzeCandidate(candidate) {
   };
   item.ineligibilityReasons = eligibilityReasons(item);
   item.eligible = item.ineligibilityReasons.length === 0;
+  item.evidenceTier = classifyEvidenceTier(item);
+  item.recommendable = item.evidenceTier !== null;
+  item.evidenceLabel = item.evidenceTier === "A"
+    ? "A级强证据"
+    : item.evidenceTier === "B"
+      ? "B级条件候选"
+      : item.evidenceTier === "C"
+        ? "C级高风险候选"
+        : "未达到候选门槛";
+  item.riskWarning = item.evidenceTier === "A"
+    ? "历史样本外证据相对较强，但仍可能亏损"
+    : item.evidenceTier === "B"
+      ? "获利期望尚可，但95%置信区间尚未排除随机性，仍可能亏损"
+      : item.evidenceTier === "C"
+        ? "仅达到宽松观察标准，误判和亏损风险较高"
+        : "当前证据不足，不作为主页候选";
   item.holdingAction = item.netProjectedReturn !== null && item.netProjectedReturn <= 0
     ? "复核退出条件"
-    : item.eligible
+    : item.evidenceTier === "A"
       ? "本周持有，不追涨加仓"
-      : "继续观察，暂不加仓";
+      : item.recommendable
+        ? "条件持有，暂不加仓"
+        : "继续观察，暂不加仓";
   return item;
 }
 
@@ -275,7 +322,12 @@ function applyHalfTurnoverWeights(targetPositions, previousPositions = []) {
 }
 
 function buildPortfolio(definition, items, previousPortfolio = null) {
-  const targetPositions = inverseVolWeights(items, definition.investedWeight);
+  const tierRank = { A: 1, B: 2, C: 3 };
+  const selectionTier = items.reduce((worst, item) =>
+    (tierRank[item.evidenceTier] ?? 3) > (tierRank[worst] ?? 0) ? item.evidenceTier : worst, null);
+  const riskBudgetMultiplier = selectionTier === "A" ? 1 : selectionTier === "B" ? 0.6 : selectionTier === "C" ? 0.35 : 0;
+  const targetInvestedWeight = definition.investedWeight * riskBudgetMultiplier;
+  const targetPositions = inverseVolWeights(items, targetInvestedWeight);
   const positions = applyHalfTurnoverWeights(targetPositions, previousPortfolio?.positions);
   const expectedReturn = positions.reduce((sum, item) => sum + item.weight * item.netProjectedReturn, 0);
   const grossExpectedReturn = positions.reduce((sum, item) => sum + item.weight * item.projectedTwoWeekReturn, 0);
@@ -290,7 +342,17 @@ function buildPortfolio(definition, items, previousPortfolio = null) {
     name: definition.name,
     philosophy: definition.philosophy,
     rationale: definition.rationale,
-    targetInvestedWeight: definition.investedWeight,
+    selectionTier,
+    selectionLabel: selectionTier === "A" ? "A级强证据组合" : selectionTier === "B" ? "B级条件组合" : selectionTier === "C" ? "C级高风险观察组合" : "现金观察",
+    riskWarning: selectionTier === "A"
+      ? "历史样本外证据相对较强，但仍不保证盈利"
+      : selectionTier === "B"
+        ? "获利期望尚可，但95%置信区间尚未排除随机性，仍有亏损可能"
+        : selectionTier === "C"
+          ? "仅达到宽松观察标准，误判和亏损风险较高，因此大幅保留现金"
+          : "没有合适候选，保持现金",
+    riskBudgetMultiplier,
+    targetInvestedWeight,
     investedWeight,
     cashWeight: 1 - investedWeight,
     grossExpectedReturn,
@@ -312,7 +374,9 @@ function buildPortfolio(definition, items, previousPortfolio = null) {
     },
     positions: positions.map((item) => ({
       ...publicFund(item),
-      positionStatus: previousCodes.has(item.code) ? item.holdingAction : "本周新候选，小额分批观察",
+      positionStatus: previousCodes.has(item.code)
+        ? item.holdingAction
+        : `${item.evidenceLabel}：${item.riskWarning}`,
     })),
   };
 }
@@ -342,10 +406,12 @@ const DEFINITIONS = [
 ];
 
 function selectTargets(eligible, previousState) {
+  const evidenceRank = { A: 1, B: 2, C: 3 };
+  const byEvidence = (a, b) => (evidenceRank[a.evidenceTier] ?? 9) - (evidenceRank[b.evidenceTier] ?? 9);
   const comparators = {
-    defensive: (a, b) => a.downsideVolatility - b.downsideVolatility || b.maxDrawdown - a.maxDrawdown,
-    balanced: (a, b) => b.rankingScore - a.rankingScore,
-    tactical: (a, b) => b.netProjectedReturn - a.netProjectedReturn,
+    defensive: (a, b) => byEvidence(a, b) || a.downsideVolatility - b.downsideVolatility || b.maxDrawdown - a.maxDrawdown,
+    balanced: (a, b) => byEvidence(a, b) || b.rankingScore - a.rankingScore,
+    tactical: (a, b) => byEvidence(a, b) || b.netProjectedReturn - a.netProjectedReturn,
   };
   return DEFINITIONS.map((definition) => {
     const target = chooseDistinct(eligible, 3, comparators[definition.id]);
@@ -415,6 +481,10 @@ function responseFrom(portfolios, signals, state, decisionStatus) {
   const allSelected = [...new Map(allPositions.map((position) => [position.code, position])).values()];
   const latestDate = signals.analyzed.map((item) => item.latestDate).sort().at(-1) ?? state?.asOf ?? null;
   const eligibleCount = signals.analyzed.filter((item) => item.eligible).length;
+  const tierCounts = signals.analyzed.reduce((counts, item) => {
+    if (item.evidenceTier) counts[item.evidenceTier] += 1;
+    return counts;
+  }, { A: 0, B: 0, C: 0 });
   return {
     portfolios,
     funds: allSelected,
@@ -427,58 +497,70 @@ function responseFrom(portfolios, signals, state, decisionStatus) {
     universeSize: signals.candidates.length,
     analyzedCount: signals.analyzed.length,
     eligibleCount,
+    tierCounts,
+    recommendableCount: tierCounts.A + tierCounts.B + tierCounts.C,
     sourceCompleteness: signals.sourceCompleteness,
     analysisCompleteness: signals.analysisCompleteness,
-    methodology: "近月排行榜候选池 → 10日净值集成预测 → 真实页面费率扣减 → 样本外硬门槛 → 周度持仓缓冲",
+    methodology: "近月排行榜候选池 → 两周产品兼容过滤 → 10日净值预测与真实费率扣减 → A/B/C分级证据 → 周度持仓缓冲",
     governance: {
       schedule: "预测信号按净值更新；交易组合每周最多更新一次",
       turnover: "保留满足门槛的原持仓；新增标的需越过缓冲；权重只调整目标变化的50%",
-      abstention: "不足三只通过门槛时不强行补满，剩余资金保持现金",
+      abstention: "A级不足时使用明确标注风险的B/C级条件候选，并按证据等级自动降低投入比例",
       feePolicy: "申购优惠费率和对应持有期赎回费来自公开费率页；实际平台费率仍需下单前核对",
     },
     concentrationWarning: allSelected.length < 3
-      ? "严格门槛下不足三只基金，系统没有强行填满组合。"
+      ? "当前可用候选不足三只，剩余风险预算保持现金。"
       : "已做主题去重，但基金底层持仓仍可能重合。",
-    caveat: "这是研究关注榜而非收益承诺。场外基金采用未知价原则，信号日净值不能当作实际成交净值；卖出动作必须结合确认日、持有期和真实费率。",
+    caveat: "B/C级只表示当前获利期望尚可，不代表已经证明稳定盈利，实际结果仍可能亏损。场外基金采用未知价原则，信号日净值不能当作实际成交净值。",
   };
 }
 
 export async function getTwoWeekRecommendations() {
   if (resultCache && Date.now() - resultCache.at < RESULT_TTL) return resultCache.value;
   const [signals, previousState] = await Promise.all([collectSignals(), readState()]);
+  const validPreviousState = previousState?.version === STATE_VERSION ? previousState : null;
   const currentWeek = weekKey(currentShanghaiDate());
   const complete = signals.sourceCompleteness >= MIN_SOURCE_COMPLETENESS
     && signals.analysisCompleteness >= MIN_ANALYSIS_COMPLETENESS;
 
-  if (previousState?.weekKey === currentWeek) {
-    const portfolios = refreshLockedPortfolios(previousState.portfolios, signals.analyzed);
-    const value = responseFrom(portfolios, signals, previousState, complete
+  if (validPreviousState?.weekKey === currentWeek) {
+    const portfolios = refreshLockedPortfolios(validPreviousState.portfolios, signals.analyzed);
+    const value = responseFrom(portfolios, signals, validPreviousState, complete
       ? "本周组合已锁定；仅更新每日信号，不因名次变化自动换仓"
       : "数据不完整；延续本周已锁定组合，不产生新交易");
     resultCache = { at: Date.now(), value };
     return value;
   }
 
-  if (!complete && previousState?.portfolios?.length) {
-    const portfolios = refreshLockedPortfolios(previousState.portfolios, signals.analyzed);
-    const value = responseFrom(portfolios, signals, previousState, "数据完整度不足；延续上期组合，不调仓");
+  if (!complete && validPreviousState?.portfolios?.length) {
+    const portfolios = refreshLockedPortfolios(validPreviousState.portfolios, signals.analyzed);
+    const value = responseFrom(portfolios, signals, validPreviousState, "数据完整度不足；延续上期组合，不调仓");
     resultCache = { at: Date.now(), value };
     return value;
   }
 
-  const eligible = signals.analyzed.filter((item) => item.eligible);
-  const portfolios = selectTargets(eligible, previousState);
+  const recommendable = signals.analyzed.filter((item) => item.recommendable);
+  const portfolios = selectTargets(recommendable, validPreviousState);
+  const tierCounts = recommendable.reduce((counts, item) => {
+    counts[item.evidenceTier] += 1;
+    return counts;
+  }, { A: 0, B: 0, C: 0 });
   const state = {
-    version: 2,
+    version: STATE_VERSION,
     weekKey: currentWeek,
     asOf: signals.analyzed.map((item) => item.latestDate).sort().at(-1) ?? null,
     createdAt: new Date().toISOString(),
     portfolios,
   };
   await writeState(state);
-  const value = responseFrom(portfolios, signals, state, eligible.length
-    ? "本周组合已生成并锁定；下次例行换仓在下周"
-    : "没有基金通过严格门槛；本周保持现金");
+  const decisionStatus = tierCounts.A > 0
+    ? "本周包含A级强证据候选；仍不保证盈利"
+    : tierCounts.B > 0
+      ? "本周采用B级条件候选：获利期望尚可，但仍有亏损可能"
+      : tierCounts.C > 0
+        ? "本周仅有C级高风险观察候选：已降低仓位，亏损风险较高"
+        : "没有基金达到宽松候选门槛；保持现金";
+  const value = responseFrom(portfolios, signals, state, decisionStatus);
   resultCache = { at: Date.now(), value };
   return value;
 }
