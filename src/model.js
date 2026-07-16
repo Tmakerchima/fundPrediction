@@ -22,26 +22,6 @@ function returnsOf(values) {
   return returns;
 }
 
-function linearSlope(values) {
-  if (values.length < 2) return 0;
-  const xAvg = (values.length - 1) / 2;
-  const yAvg = mean(values);
-  let numerator = 0;
-  let denominator = 0;
-  for (let i = 0; i < values.length; i += 1) {
-    numerator += (i - xAvg) * (values[i] - yAvg);
-    denominator += (i - xAvg) ** 2;
-  }
-  return denominator ? numerator / denominator : 0;
-}
-
-function ewma(values, alpha = 0.12) {
-  if (!values.length) return 0;
-  let result = values[0];
-  for (let i = 1; i < values.length; i += 1) result = alpha * values[i] + (1 - alpha) * result;
-  return result;
-}
-
 function quantile(values, probability) {
   if (!values.length) return 0;
   const sorted = [...values].sort((a, b) => a - b);
@@ -91,27 +71,28 @@ function nextWeekday(dateText, offset) {
 }
 
 /**
- * Forecast log NAV with a conservative ensemble:
- * 45% damped local trend, 35% exponentially weighted momentum, 20% mean reversion.
+ * Equal-weight 1/3/12-month time-series trend signal. These are public research
+ * horizons rather than fitted fund-specific weights. The magnitude is calibrated
+ * separately using only observations that precede each prediction.
  */
+function multiHorizonTrend(values) {
+  const latest = values.at(-1);
+  const horizons = [20, 60, 252].filter((lookback) => values.length > lookback);
+  return mean(horizons.map((lookback) => Math.log(latest / values.at(-lookback - 1)) / lookback));
+}
+
+/** Forecast log NAV from an equal-weight public trend specification. */
 export function forecastNav(points, horizon = 20) {
   if (points.length < 40) throw new Error("至少需要 40 个净值数据点才能预测");
   const values = points.map((point) => point.nav);
   const latest = values.at(-1);
-  const logWindow = values.slice(-60).map(Math.log);
   const recentReturns = returnsOf(values.slice(-91));
-  const trendDaily = linearSlope(logWindow);
-  const momentumDaily = ewma(recentReturns.slice(-30), 0.12);
-  const average60 = mean(values.slice(-60));
-  const reversionTotal = Math.log(average60 / latest) * 0.18;
   const residualVol = std(recentReturns.slice(-60));
-  const dailyDrift = clamp(0.45 * trendDaily + 0.35 * momentumDaily, -0.012, 0.012);
+  const dailyDrift = clamp(multiHorizonTrend(values), -0.012, 0.012);
   const forecast = [];
 
   for (let step = 1; step <= horizon; step += 1) {
-    const damping = (1 - Math.exp(-step / 24)) * 24;
-    const reversion = reversionTotal * (1 - Math.exp(-step / 45));
-    const logReturn = dailyDrift * damping + 0.2 * reversion;
+    const logReturn = dailyDrift * step;
     const expected = latest * Math.exp(logReturn);
     const uncertainty = Math.max(residualVol, 0.0025) * Math.sqrt(step);
     forecast.push({
@@ -128,16 +109,8 @@ export function forecastNav(points, horizon = 20) {
 
 function predictAt(values, horizon) {
   const latest = values.at(-1);
-  const logWindow = values.slice(-60).map(Math.log);
-  const recentReturns = returnsOf(values.slice(-91));
-  const trendDaily = linearSlope(logWindow);
-  const momentumDaily = ewma(recentReturns.slice(-30), 0.12);
-  const average60 = mean(values.slice(-60));
-  const reversionTotal = Math.log(average60 / latest) * 0.18;
-  const dailyDrift = clamp(0.45 * trendDaily + 0.35 * momentumDaily, -0.012, 0.012);
-  const damping = (1 - Math.exp(-horizon / 24)) * 24;
-  const reversion = reversionTotal * (1 - Math.exp(-horizon / 45));
-  return latest * Math.exp(dailyDrift * damping + 0.2 * reversion);
+  const dailyDrift = clamp(multiHorizonTrend(values), -0.012, 0.012);
+  return latest * Math.exp(dailyDrift * horizon);
 }
 
 function wilsonInterval(successes, total, z = 1.96) {
@@ -153,6 +126,27 @@ export function backtest(points, horizon = 20) {
   const values = points.map((point) => point.nav);
   const available = Math.min(500, Math.floor(values.length * 0.6));
   const start = Math.max(60, values.length - available - horizon);
+  const observations = [];
+  for (let index = start; index + horizon < values.length; index += horizon) {
+    const history = values.slice(0, index + 1);
+    const origin = values[index];
+    observations.push({
+      origin,
+      predictedLogReturn: Math.log(predictAt(history, horizon) / origin),
+      actual: values[index + horizon],
+    });
+  }
+
+  const calibrationFactorOf = (sample) => {
+    const denominator = sample.reduce((sum, item) => sum + item.predictedLogReturn ** 2, 0);
+    if (!denominator) return 0;
+    const numerator = sample.reduce((sum, item) =>
+      sum + item.predictedLogReturn * Math.log(item.actual / item.origin), 0);
+    // Robust forecasting may shrink an estimate toward zero, but never magnify it
+    // or silently turn a failed trend signal into an opposite strategy.
+    return clamp(numerator / denominator, 0, 1);
+  };
+  const warmup = Math.min(8, Math.max(3, Math.floor(observations.length / 4)));
   const errors = [];
   const modelSquaredErrors = [];
   const baselineSquaredErrors = [];
@@ -161,22 +155,22 @@ export function backtest(points, horizon = 20) {
   let predictedUpCount = 0;
   let predictedUpWins = 0;
   let predictedUpRealizedReturn = 0;
-  // 使用不重叠的预测窗口，使方向命中率样本更接近统计独立。
-  for (let index = start; index + horizon < values.length; index += horizon) {
-    const history = values.slice(0, index + 1);
-    const predicted = predictAt(history, horizon);
-    const actual = values[index + horizon];
+  // 使用不重叠窗口；每个历史预测只能使用当时之前的样本计算收缩系数。
+  for (let sampleIndex = warmup; sampleIndex < observations.length; sampleIndex += 1) {
+    const { origin, predictedLogReturn, actual } = observations[sampleIndex];
+    const calibrationFactor = calibrationFactorOf(observations.slice(0, sampleIndex));
+    const predicted = origin * Math.exp(predictedLogReturn * calibrationFactor);
     errors.push(Math.abs(predicted - actual) / actual);
     modelSquaredErrors.push((predicted - actual) ** 2);
-    baselineSquaredErrors.push((values[index] - actual) ** 2);
-    const predictedDirection = Math.sign(predicted / values[index] - 1);
-    const actualDirection = Math.sign(actual / values[index] - 1);
+    baselineSquaredErrors.push((origin - actual) ** 2);
+    const predictedDirection = Math.sign(predicted / origin - 1);
+    const actualDirection = Math.sign(actual / origin - 1);
     if (predictedDirection === actualDirection) directionHits += 1;
     directionCount += 1;
     if (predictedDirection > 0) {
       predictedUpCount += 1;
       if (actualDirection > 0) predictedUpWins += 1;
-      predictedUpRealizedReturn += actual / values[index] - 1;
+      predictedUpRealizedReturn += actual / origin - 1;
     }
   }
   const modelSse = modelSquaredErrors.reduce((sum, value) => sum + value, 0);
@@ -189,8 +183,28 @@ export function backtest(points, horizon = 20) {
     oosR2VsRandomWalk: baselineSse > 0 ? 1 - modelSse / baselineSse : 0,
     predictedUpSamples: predictedUpCount,
     predictedUpWinRate: predictedUpCount ? predictedUpWins / predictedUpCount : null,
+    predictedUpInterval95: wilsonInterval(predictedUpWins, predictedUpCount),
+    posteriorUpProbability: predictedUpCount ? (predictedUpWins + 1) / (predictedUpCount + 2) : null,
     predictedUpAverageReturn: predictedUpCount ? predictedUpRealizedReturn / predictedUpCount : null,
+    calibrationFactor: calibrationFactorOf(observations),
+    calibrationSamples: observations.length,
   };
+}
+
+function applyForecastCalibration(forecast, latest, factor) {
+  return forecast.map((point) => {
+    const center = latest * Math.exp(Math.log(point.nav / latest) * factor);
+    const half80 = (Math.log(point.upper80) - Math.log(point.lower80)) / 2;
+    const half95 = (Math.log(point.upper95) - Math.log(point.lower95)) / 2;
+    return {
+      ...point,
+      nav: center,
+      lower80: center * Math.exp(-half80),
+      upper80: center * Math.exp(half80),
+      lower95: center * Math.exp(-half95),
+      upper95: center * Math.exp(half95),
+    };
+  });
 }
 
 export function analyzeRisk(points, forecast, riskProfile = "balanced") {
@@ -263,10 +277,12 @@ export function analyzeRisk(points, forecast, riskProfile = "balanced") {
 
 export function buildAnalysis(points, horizon = 20, riskProfile = "balanced") {
   const cleanHorizon = clamp(Number(horizon) || 20, 5, 60);
-  const forecast = forecastNav(points, cleanHorizon);
+  const rawForecast = forecastNav(points, cleanHorizon);
+  const validation = backtest(points, Math.min(cleanHorizon, 20));
+  const forecast = applyForecastCalibration(rawForecast, points.at(-1).nav, validation.calibrationFactor);
   return {
     forecast,
-    backtest: backtest(points, Math.min(cleanHorizon, 20)),
+    backtest: validation,
     assessment: analyzeRisk(points, forecast, riskProfile),
   };
 }

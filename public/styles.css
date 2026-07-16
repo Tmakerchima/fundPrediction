@@ -27,6 +27,9 @@ button { color: inherit; }
 
 .topbar { height: 76px; padding: 0 max(28px, calc((100vw - 1380px) / 2)); display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line); background: rgba(8, 11, 16, .75); backdrop-filter: blur(18px); position: sticky; top: 0; z-index: 20; }
 .brand { display: flex; gap: 12px; align-items: center; text-decoration: none; color: var(--text); font-weight: 700; letter-spacing: -.03em; font-size: 19px; }
+.brand-cluster { display: flex; align-items: center; gap: 14px; }
+.model-link { padding-left: 14px; border-left: 1px solid var(--line); color: var(--muted); text-decoration: none; font-size: 11px; font-weight: 800; letter-spacing: .14em; }
+.model-link:hover, .model-link.active { color: var(--green); }
 .brand-mark { width: 28px; height: 28px; display: flex; gap: 3px; align-items: flex-end; padding: 6px; border: 1px solid rgba(57,229,158,.35); border-radius: 9px; background: var(--green-soft); }
 .brand-mark i { width: 3px; background: var(--green); border-radius: 3px; }
 .brand-mark i:nth-child(1) { height: 7px; }.brand-mark i:nth-child(2) { height: 13px; }.brand-mark i:nth-child(3) { height: 10px; }

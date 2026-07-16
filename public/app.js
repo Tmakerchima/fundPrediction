@@ -86,8 +86,10 @@ function renderDashboard() {
   $("#freshness").innerHTML = `<span></span>${daysOld > 5 ? `净值已滞后 ${daysOld} 天` : "数据已校验"}`;
   renderSignal(model.assessment);
   renderMetrics(model.assessment.metrics);
-  $("#directionAccuracy").textContent = `${(model.backtest.directionAccuracy * 100).toFixed(1)}%`;
-  $("#directionInterval").textContent = `95% 区间 ${(model.backtest.directionInterval95.lower * 100).toFixed(0)}%–${(model.backtest.directionInterval95.upper * 100).toFixed(0)}%`;
+  const upRate = model.backtest.predictedUpWinRate;
+  const upInterval = model.backtest.predictedUpInterval95;
+  $("#directionAccuracy").textContent = upRate === null ? "样本不足" : `${(upRate * 100).toFixed(1)}%`;
+  $("#directionInterval").textContent = upRate === null ? "历史看涨样本不足" : `95% 区间 ${(upInterval.lower * 100).toFixed(0)}%–${(upInterval.upper * 100).toFixed(0)}%`;
   $("#mape").textContent = `${(model.backtest.mape * 100).toFixed(2)}%`;
   $("#sampleCount").textContent = `${model.backtest.samples} 个样本外预测点`;
   $("#oosR2").textContent = `${model.backtest.oosR2VsRandomWalk >= 0 ? "+" : ""}${(model.backtest.oosR2VsRandomWalk * 100).toFixed(1)}%`;

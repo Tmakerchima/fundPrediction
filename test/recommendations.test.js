@@ -30,7 +30,8 @@ test("strict eligibility requires fees and sample-out evidence", () => {
     backtest: {
       oosR2VsRandomWalk: 0.1,
       predictedUpSamples: 24,
-      directionInterval95: { lower: 0.51 },
+      predictedUpWinRate: 0.6,
+      predictedUpInterval95: { lower: 0.51 },
     },
   };
   assert.deepEqual(eligibilityReasons(item), []);
@@ -46,13 +47,13 @@ test("evidence tiers relax confidence without hiding the risk distinction", () =
     backtest: {
       oosR2VsRandomWalk: 0.1,
       predictedUpSamples: 24,
-      directionAccuracy: 0.6,
-      directionInterval95: { lower: 0.47 },
+      predictedUpWinRate: 0.6,
+      predictedUpInterval95: { lower: 0.47 },
     },
   };
   assert.equal(classifyEvidenceTier(base), "B");
-  assert.equal(classifyEvidenceTier({ ...base, backtest: { ...base.backtest, directionInterval95: { lower: 0.51 } } }), "A");
-  assert.equal(classifyEvidenceTier({ ...base, backtest: { ...base.backtest, oosR2VsRandomWalk: -0.1, directionAccuracy: 0.52 } }), "C");
+  assert.equal(classifyEvidenceTier({ ...base, backtest: { ...base.backtest, predictedUpInterval95: { lower: 0.51 } } }), "A");
+  assert.equal(classifyEvidenceTier({ ...base, backtest: { ...base.backtest, oosR2VsRandomWalk: -0.1, predictedUpWinRate: 0.52 } }), "C");
 });
 
 test("long holding and retirement products are excluded from a two-week strategy", () => {

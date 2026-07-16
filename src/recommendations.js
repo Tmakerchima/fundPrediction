@@ -16,7 +16,7 @@ const MIN_SOURCE_COMPLETENESS = Number(process.env.MIN_SOURCE_COMPLETENESS || 0.
 const MIN_ANALYSIS_COMPLETENESS = Number(process.env.MIN_ANALYSIS_COMPLETENESS || 0.7);
 const CANDIDATES_PER_TYPE = Number(process.env.CANDIDATES_PER_TYPE || 40);
 const HALF_TURNOVER = 0.5;
-const STATE_VERSION = 3;
+const STATE_VERSION = 4;
 let resultCache = null;
 
 function themeOf(name) {
@@ -34,8 +34,8 @@ function themeOf(name) {
 }
 
 function reliabilityOf(backtest) {
-  if (backtest.oosR2VsRandomWalk > 0.05 && backtest.directionInterval95.lower >= 0.5) return "中等";
-  if (backtest.oosR2VsRandomWalk > 0 && backtest.directionAccuracy >= 0.55) return "初步";
+  if (backtest.oosR2VsRandomWalk > 0.05 && backtest.predictedUpInterval95?.lower >= 0.5) return "中等";
+  if (backtest.oosR2VsRandomWalk > 0 && backtest.predictedUpWinRate >= 0.55) return "初步";
   return "偏低";
 }
 
@@ -85,7 +85,7 @@ export function eligibilityReasons(item) {
   if (!(item.rsi14 < 84)) reasons.push("RSI过热");
   if (!(item.backtest.oosR2VsRandomWalk > 0)) reasons.push("样本外R²未战胜随机游走");
   if (!(item.backtest.predictedUpSamples >= 20)) reasons.push("看涨样本少于20个");
-  if (!(item.backtest.directionInterval95.lower >= 0.5)) reasons.push("方向命中率置信下限未超过50%");
+  if (!(item.backtest.predictedUpInterval95?.lower >= 0.5)) reasons.push("历史看涨胜率置信下限未超过50%");
   if (!item.twoWeekCompatible) reasons.push("产品持有安排不适合两周操作");
   return reasons;
 }
@@ -98,15 +98,15 @@ export function classifyEvidenceTier(item) {
   if (base
     && item.backtest.oosR2VsRandomWalk > 0
     && item.backtest.predictedUpSamples >= 20
-    && item.backtest.directionInterval95.lower >= 0.5) return "A";
+    && item.backtest.predictedUpInterval95?.lower >= 0.5) return "A";
   if (base
     && item.backtest.oosR2VsRandomWalk > 0
     && item.backtest.predictedUpSamples >= 20
-    && item.backtest.directionAccuracy >= 0.55) return "B";
+    && item.backtest.predictedUpWinRate >= 0.55) return "B";
   if (base
     && item.backtest.oosR2VsRandomWalk > -0.25
     && item.backtest.predictedUpSamples >= 15
-    && item.backtest.directionAccuracy >= 0.5) return "C";
+    && item.backtest.predictedUpWinRate >= 0.5) return "C";
   return null;
 }
 
@@ -123,6 +123,7 @@ function finalizeCandidate(item, fees = item.fees) {
     netProfitProbability: netProjectedReturn === null
       ? null
       : normalCdfApprox(Math.log(1 + netProjectedReturn) / item.forecastRisk),
+    empiricalProfitProbability: item.backtest.posteriorUpProbability,
     rankingScore: netProjectedReturn === null ? Number.NEGATIVE_INFINITY : netProjectedReturn / item.forecastRisk,
     errorCoverage: netProjectedReturn === null || !item.backtest.mape ? null : netProjectedReturn / item.backtest.mape,
   };
@@ -183,7 +184,7 @@ async function analyzeCandidate(candidate) {
     && metrics.rsi14 < 84
     && model.backtest.oosR2VsRandomWalk > -0.25
     && model.backtest.predictedUpSamples >= 15
-    && model.backtest.directionAccuracy >= 0.5;
+    && model.backtest.predictedUpWinRate >= 0.5;
   const logSigma = Math.max((Math.log(lastForecast.upper80) - Math.log(lastForecast.lower80)) / (2 * 1.282), 0.0001);
   const tenDayRisk = Math.max(metrics.annualizedVolatility * Math.sqrt(HORIZON / 252), 0.005);
   const modelProfitProbability = normalCdfApprox(Math.log(lastForecast.nav / latest.nav) / logSigma);
@@ -200,6 +201,7 @@ async function analyzeCandidate(candidate) {
     projectedTwoWeekReturn: projectedReturn,
     netProjectedReturn: null,
     modelProfitProbability,
+    empiricalProfitProbability: model.backtest.posteriorUpProbability,
     netProfitProbability: null,
     forecastRisk: tenDayRisk,
     feeCheckEligible: meritsFeeCheck,
@@ -525,10 +527,11 @@ function responseFrom(portfolios, signals, state, decisionStatus) {
     recommendableCount: tierCounts.A + tierCounts.B + tierCounts.C,
     sourceCompleteness: signals.sourceCompleteness,
     analysisCompleteness: signals.analysisCompleteness,
-    methodology: "近月排行榜候选池 → 两周产品兼容过滤 → 10日净值预测与真实费率扣减 → A/B/C分级证据 → 周度持仓缓冲",
+    methodology: "近月排行榜候选池 → 1/3/12月等权趋势 → 仅用历史样本校准并向零收缩 → 真实费率扣减 → 历史看涨条件胜率分级 → 波动率配置与周度持仓缓冲",
     governance: {
       schedule: "预测信号按净值更新；交易组合每周最多更新一次",
       turnover: "保留满足门槛的原持仓；新增标的需越过缓冲；权重只调整目标变化的50%",
+      forecastCalibration: "每个历史时点只用此前样本估计趋势预测的收缩系数；系数限制在0到1，不放大失效信号，也不把趋势自动反转成另一套策略",
       abstention: "A级不足时使用明确标注风险的B/C级条件候选，并按证据等级自动降低投入比例",
       feePolicy: "申购优惠费率和对应持有期赎回费来自公开费率页；实际平台费率仍需下单前核对",
     },
@@ -639,7 +642,7 @@ export async function getHoldingReview(code, options = {}) {
     action,
     rationale: signal.ineligibilityReasons.length
       ? signal.ineligibilityReasons
-      : ["费用后预测为正", "样本外R²为正", "方向命中率置信下限不低于50%"],
+      : ["费用后预测为正", "样本外R²为正", "历史看涨胜率置信下限不低于50%"],
     disclaimer: "持仓评估不会因为基金掉出主页前三就自动给出卖出指令；实际交易以前台显示的确认净值和销售平台费率为准。",
   };
 }

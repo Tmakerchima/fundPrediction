@@ -42,6 +42,9 @@ test("walk-forward backtest never leaks past the prediction origin", () => {
   assert.ok(result.directionInterval95.lower <= result.directionAccuracy);
   assert.ok(result.directionInterval95.upper >= result.directionAccuracy);
   assert.ok(Number.isFinite(result.oosR2VsRandomWalk));
+  assert.ok(result.calibrationFactor >= 0 && result.calibrationFactor <= 1);
+  assert.ok(result.calibrationSamples >= result.samples);
+  assert.ok(result.predictedUpInterval95.lower <= result.predictedUpInterval95.upper);
 });
 
 test("buildAnalysis clamps horizon", () => {

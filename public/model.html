@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f3f7f5" />
+    <meta name="description" content="FundLens 模型参数、来源和推荐合理性说明" />
+    <title>FundLens — Model</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="stylesheet" href="/styles.css?v=0.5" />
+    <link rel="stylesheet" href="/model.css?v=0.2" />
+  </head>
+  <body class="model-page">
+    <header class="topbar">
+      <div class="brand-cluster">
+        <a class="brand" href="/" aria-label="FundLens 首页">
+          <span class="brand-mark"><i></i><i></i><i></i></span>
+          <span>FundLens</span>
+        </a>
+        <a class="model-link active" href="/model.html" aria-current="page">MODEL</a>
+      </div>
+      <nav class="market-nav" aria-label="市场切换">
+        <a href="/">场外基金</a>
+        <a href="/a-shares.html">场内 A 股</a>
+        <a href="/us-stocks.html">美股</a>
+      </nav>
+      <div class="topbar-meta"><span class="live-dot"></span><span>参数可审计</span></div>
+    </header>
+
+    <main class="model-main">
+      <section class="model-hero">
+        <div>
+          <span class="section-kicker">MODEL AUDIT / FUND v0.4</span>
+          <h1>模型用了什么，<br />没有用什么。</h1>
+          <p>这里展示场外基金两周推荐的真实代码参数、证据门槛和局限。参数公开不等于模型已经证明可以稳定盈利。</p>
+        </div>
+        <aside class="jane-card institution-card">
+          <div class="answer-row"><span>2026 机构公开模型核验</span><strong>已完成</strong></div>
+          <div class="model-name">0 <small>个可直接复现的 Citadel / Two Sigma / Goldman 交易参数</small></div>
+          <div class="adoption-list"><span>Citadel：私有</span><span>Two Sigma：私有</span><span>Goldman：工具箱</span><span>Man AHL：研究代理</span></div>
+          <p>这些机构在2026年公开了数据、AI研究、特征提取和风险管理方法，但没有公开生产alpha的特征权重、训练数据或下单参数。FundLens不会把机构文章冒充成已采用的交易模型。</p>
+          <div class="challenger-box">
+            <span>最新可复现挑战模型</span>
+            <strong>Chronos-2 · TimesFM 2.5</strong>
+            <small>仅列入影子回测，尚未影响推荐或真钱仓位</small>
+          </div>
+          <p class="jane-note">当前生产基线仍是透明趋势模型；AQR的基础论文较早，但其公开因子数据在<b>2026-05</b>仍有更新。新模型只有在场外基金净费后样本外回测胜出后才可替换。</p>
+          <a href="https://github.com/amazon-science/chronos-forecasting" target="_blank" rel="noreferrer">查看 Chronos-2 官方代码 ↗</a>
+        </aside>
+      </section>
+
+      <section class="model-section">
+        <div class="section-heading"><span>01</span><div><h2>2026 公开模型审计</h2><p>“最新公开文章”不等于“公开了可交易模型”；下列结论只按机构官网和官方代码仓库判断。</p></div></div>
+        <div class="source-grid">
+          <article><b>CITADEL EQR · 2026</b><strong>公开研究流水线</strong><p>官网说明“数据→预测→交易”和另类数据研究过程，但生产数据、信号权重、风险约束与执行参数均未公开。直接采用参数：0。</p><a href="https://www.citadel.com/careers/career-perspectives/inside-eqr-what-it-means-quantitative-researcher/" target="_blank" rel="noreferrer">机构原文 ↗</a></article>
+          <article><b>TWO SIGMA · 2026</b><strong>公开AI研究治理</strong><p>公开材料强调LLM特征提取、样本外验证和生产监控，并明确警告AI会放大回测过拟合；未公开交易alpha。直接采用参数：0。</p><a href="https://www.twosigma.com/articles/ai-in-investment-management-2026-outlook-part-ii/" target="_blank" rel="noreferrer">机构原文 ↗</a></article>
+          <article><b>GOLDMAN SACHS · 2026</b><strong>公开工具，不公开alpha</strong><p>QIS公开使用大小语言模型提取信息；GS Quant是衍生品与风险分析工具箱，需要机构API权限的部分也不是基金涨跌模型。直接采用参数：0。</p><a href="https://github.com/goldmansachs/gs-quant" target="_blank" rel="noreferrer">官方代码 ↗</a></article>
+          <article><b>MAN AHL · 2026</b><strong>AlphaTrend研究代理</strong><p>AlphaTrend用于加速内部信号研究工作流，并未发布最终预测公式和生产权重；可借鉴研究流程，不能标注为已使用其模型。直接采用参数：0。</p><a href="https://www.man.com/insights/alphatrend-agentic-research-workflows" target="_blank" rel="noreferrer">机构原文 ↗</a></article>
+        </div>
+        <div class="challenger-grid">
+          <article><b>挑战模型 A</b><strong>Amazon Chronos-2</strong><p>2025年发布的120M时间序列基础模型，支持零样本单变量、多变量和协变量预测。适合先做独立影子回测，但不是金融机构alpha，也没有场外基金盈利保证。</p></article>
+          <article><b>挑战模型 B</b><strong>Google TimesFM 2.5</strong><p>2025年发布、2026年加入LoRA微调的200M模型，支持概率分位预测。部署成本高于当前Node服务，必须防止用未来信息微调造成回测泄漏。</p></article>
+          <article class="challenger-verdict"><b>替换条件</b><strong>先验证，再晋级</strong><p>只有在逐周、去泄漏、计入申赎费的样本外测试中，同时胜过随机游走和当前透明基线，挑战模型才允许影响首页排名与仓位。</p></article>
+        </div>
+      </section>
+
+      <section class="model-section">
+        <div class="section-heading"><span>02</span><div><h2>当前实际参数</h2><p>以下数值直接对应代码，而不是营销概述。</p></div></div>
+        <div class="parameter-table-wrap">
+          <table class="parameter-table">
+            <thead><tr><th>环节</th><th>参数</th><th>当前值</th><th>作用</th></tr></thead>
+            <tbody>
+              <tr><td>候选池</td><td>基金类别 / 每类数量</td><td>股票、混合、指数、债券、QDII / 40</td><td>从东方财富近1月排行榜构造研究池，存在动量预筛选偏差。</td></tr>
+              <tr><td>数据</td><td>最低历史 / 最大数据滞后</td><td>252点 / 7天</td><td>历史不足或净值过期时不参与推荐。</td></tr>
+              <tr><td>预测</td><td>持有与预测窗口</td><td>10个交易日</td><td>约两周，不代表保证持有满两周。</td></tr>
+              <tr><td>趋势</td><td>回看期限 / 权重</td><td>20、60、252日 / 可用期限等权</td><td>使用自身历史趋势，不读取LLM意见。</td></tr>
+              <tr><td>限幅</td><td>日对数趋势上限</td><td>-1.2% ～ +1.2%</td><td>防止异常净值让预测无限外推。</td></tr>
+              <tr><td>校准</td><td>预测收缩系数 β</td><td>β = clamp(Σ预测×实际 / Σ预测², 0, 1)</td><td>历史不支持时向0收缩；不能放大，也不能反向。</td></tr>
+              <tr><td>区间</td><td>残差波动 / 下限 / 分位</td><td>近60日 / 0.25%日波动 / 1.282与1.96</td><td>生成80%和95%预测区间。</td></tr>
+              <tr><td>回测</td><td>窗口 / 最大样本范围</td><td>不重叠10日窗口 / 最近500日或历史60%</td><td>减少重叠收益造成的伪样本数量。</td></tr>
+              <tr><td>概率</td><td>看涨后验</td><td>(上涨次数 + 1) / (看涨次数 + 2)</td><td>避免小样本直接显示0%或100%。</td></tr>
+              <tr><td>费用</td><td>核验数量 / 费用</td><td>初筛前18只 / 优惠申购费 + 对应持有期赎回费</td><td>推荐排序使用费用后收益，而非毛收益。</td></tr>
+              <tr><td>风险</td><td>RSI上限 / 两周风险下限</td><td>84 / 0.5%</td><td>过滤极端过热，并避免风险分母过小。</td></tr>
+              <tr><td>仓位</td><td>基础投入比例</td><td>防守55% / 均衡75% / 趋势85%</td><td>再乘证据等级系数：A=1、B=0.6、C=0.35。</td></tr>
+              <tr><td>权重</td><td>单基金配置</td><td>逆波动率；年化波动率最低按8%计</td><td>降低高波动基金对组合的支配。</td></tr>
+              <tr><td>调仓</td><td>频率 / 权重移动</td><td>每周最多一次 / 每次向目标移动50%</td><td>避免每日榜单变化导致追涨杀跌。</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="model-section">
+        <div class="section-heading"><span>03</span><div><h2>推荐证据等级</h2><p>所有等级都必须：产品适合两周、费率已验证、费用后预测为正且RSI低于84。</p></div></div>
+        <div class="tier-grid">
+          <article class="tier-a"><div><b>A</b><strong>强证据候选</strong></div><ul><li>样本外R² &gt; 0</li><li>历史看涨样本 ≥ 20</li><li>看涨胜率Wilson 95%下限 ≥ 50%</li></ul></article>
+          <article class="tier-b"><div><b>B</b><strong>条件候选</strong></div><ul><li>样本外R² &gt; 0</li><li>历史看涨样本 ≥ 20</li><li>看涨条件胜率 ≥ 55%</li></ul></article>
+          <article class="tier-c"><div><b>C</b><strong>高风险观察</strong></div><ul><li>样本外R² &gt; -25%</li><li>历史看涨样本 ≥ 15</li><li>看涨条件胜率 ≥ 50%</li></ul></article>
+        </div>
+      </section>
+
+      <section class="model-section current-section">
+        <div class="section-heading"><span>04</span><div><h2>本周推荐合理性</h2><p>这里读取与首页相同的实时推荐结果，不另外计算一套结论。</p></div></div>
+        <div id="currentModelState" class="current-state"><div class="model-loading">正在读取本周组合和样本外证据…</div></div>
+      </section>
+
+      <section class="model-section data-section">
+        <div class="section-heading"><span>05</span><div><h2>数据接口与完整度</h2><p>“数据源返回成功”不等于“覆盖全市场所有基金”。</p></div></div>
+        <div class="data-status">
+          <div><span>最新净值日期</span><strong id="dataAsOf">读取中</strong></div>
+          <div><span>排行榜接口完整度</span><strong id="sourceCompleteness">—</strong></div>
+          <div><span>候选分析完整度</span><strong id="dataCoverage">—</strong></div>
+          <div class="data-verdict"><span>是否为全市场完整数据</span><strong>否：当前是研究候选池</strong></div>
+        </div>
+        <div class="data-grid">
+          <article><b>候选排行榜</b><code>api.fund.eastmoney.com/FundTradeRank/GetRankList</code><p>读取股票、混合、指数、债券、QDII五类近1月排名，每类最多40只，再去重；不是全部公募基金。</p></article>
+          <article><b>历史单位净值</b><code>fund.eastmoney.com/pingzhongdata/{code}.js</code><p>当前最多保留800个日频净值点。场外基金没有盘中实时净值，通常在收盘后更新。</p></article>
+          <article><b>申购与赎回费率</b><code>fundf10.eastmoney.com/jjfl_{code}.html</code><p>解析公开费率页，核验初筛前18只。最终下单仍应以销售平台实际优惠和持有期规则为准。</p></article>
+          <article><b>基金搜索与元数据</b><code>fundsuggest.eastmoney.com/FundSearchAPI</code><p>用于基金代码、名称、类型和可购买状态查询。接口属于第三方公开页面服务，并非官方交易所数据协议。</p></article>
+        </div>
+        <div class="data-note">当前页面的“数据源完整度100%”只表示五类排行榜接口全部成功返回；“分析完整度”表示候选中成功取得足够历史净值并完成模型计算的比例。</div>
+      </section>
+
+      <section class="model-section limitations">
+        <div class="section-heading"><span>06</span><div><h2>还不能证明什么</h2><p>公开参数只能让系统可审计，不能让未来收益变得确定。</p></div></div>
+        <div class="limit-grid">
+          <article><strong>没有完整策略级历史回测</strong><p>当前尚未在每个历史日期重新构造全市场候选池，因此仍有幸存者偏差和排行榜预筛选偏差。</p></article>
+          <article><strong>两周期限证据有限</strong><p>任何机构公开研究或时间序列基础模型，都不能直接证明中国场外基金两周交易同样有效；必须用本市场净值与真实费率单独验证。</p></article>
+          <article><strong>未知价与QDII时滞</strong><p>信号净值不等于下一笔确认净值；海外基金还可能多滞后一个或多个交易日。</p></article>
+          <article><strong>LLM不改变数值</strong><p>Qwen只审查用户提供的公告或报告文本，不参与趋势、概率、排名和仓位计算。</p></article>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="/model-page.js?v=0.1"></script>
+  </body>
+</html>
